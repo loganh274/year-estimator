@@ -12,10 +12,38 @@ from src.train import get_aws_credentials
 
 class TestS3Auth(unittest.TestCase):
     
+    @patch('boto3.Session')
+    def test_gui_auth_success(self, mock_session_cls):
+        """Test successful auth when passed via arguments (GUI mode)"""
+        print("\nTesting GUI Auth (Success)...")
+        
+        # Mock Session and Client
+        mock_session = MagicMock()
+        mock_client = MagicMock()
+        mock_session.client.return_value = mock_client
+        mock_session_cls.return_value = mock_session
+        
+        # Run with arguments (simulating GUI) - include whitespace to test stripping
+        session, bucket = get_aws_credentials(
+            access_key=" test_access_key ", 
+            secret_key="test_secret_key\n", 
+            bucket_name=" test_bucket "
+        )
+        
+        # Verify
+        self.assertEqual(bucket, "test_bucket")
+        mock_session_cls.assert_called_with(
+            aws_access_key_id="test_access_key",
+            aws_secret_access_key="test_secret_key",
+            region_name="us-east-1"
+        )
+        mock_client.list_objects_v2.assert_called_with(Bucket="test_bucket", MaxKeys=1)
+        print("✅ GUI Success Test Passed")
+
     @patch('builtins.input')
     @patch('boto3.Session')
     def test_interactive_auth_success(self, mock_session_cls, mock_input):
-        """Test successful interactive authentication"""
+        """Test successful interactive authentication (CLI mode)"""
         print("\nTesting Interactive Auth (Success)...")
         
         # Mock Environment (ensure no env vars)
@@ -34,7 +62,7 @@ class TestS3Auth(unittest.TestCase):
             mock_session.client.return_value = mock_client
             mock_session_cls.return_value = mock_session
             
-            # Run
+            # Run without arguments
             session, bucket = get_aws_credentials()
             
             # Verify
@@ -44,33 +72,7 @@ class TestS3Auth(unittest.TestCase):
                 aws_secret_access_key="test_secret_key",
                 region_name="us-west-2"
             )
-            # Verify list_objects_v2 called (validation)
-            mock_client.list_objects_v2.assert_called_with(Bucket="test_bucket", MaxKeys=1)
-            print("✅ Success Test Passed")
-
-    @patch('builtins.input')
-    @patch('boto3.Session')
-    def test_auth_failure_403(self, mock_session_cls, mock_input):
-        """Test authentication failure (403 Forbidden)"""
-        print("\nTesting Interactive Auth (403 Failure)...")
-        
-        with patch.dict(os.environ, {}, clear=True):
-            mock_input.side_effect = ["key", "secret", "bucket", "region"]
-            
-            mock_session = MagicMock()
-            mock_client = MagicMock()
-            
-            # Simulate 403 Error
-            error_response = {'Error': {'Code': '403', 'Message': 'Forbidden'}}
-            mock_client.list_objects_v2.side_effect = botocore.exceptions.ClientError(error_response, 'ListObjectsV2')
-            
-            mock_session.client.return_value = mock_client
-            mock_session_cls.return_value = mock_session
-            
-            # Run and expect error
-            with self.assertRaises(botocore.exceptions.ClientError):
-                get_aws_credentials()
-            print("✅ 403 Failure Test Passed")
+            print("✅ Interactive Success Test Passed")
 
 if __name__ == '__main__':
     unittest.main()

@@ -27,9 +27,29 @@ def get_aws_credentials(access_key=None, secret_key=None, bucket_name=None, regi
         region = os.environ.get('AWS_REGION', 'us-east-1')
 
     if not all([access_key, secret_key, bucket_name]):
-        # Only prompt if we are in an interactive terminal and not being called from GUI
-        # For now, we'll just raise an error if missing, as the GUI should provide them
-        raise ValueError("Missing AWS credentials. Please provide them in the settings.")
+        # Interactive CLI Fallback
+        print("AWS credentials not found.")
+        print("Please enter your AWS details:")
+        
+        if not access_key:
+            access_key = input("AWS Access Key ID: ").strip()
+        if not secret_key:
+            secret_key = input("AWS Secret Access Key: ").strip()
+        if not bucket_name:
+            bucket_name = input("S3 Bucket Name: ").strip()
+        
+        region_input = input(f"AWS Region [{region}]: ").strip()
+        if region_input:
+            region = region_input
+
+    # Ensure no whitespace
+    if access_key: access_key = access_key.strip()
+    if secret_key: secret_key = secret_key.strip()
+    if bucket_name: bucket_name = bucket_name.strip()
+    if region: region = region.strip()
+
+    if not all([access_key, secret_key, bucket_name]):
+        raise ValueError("Missing AWS credentials. Please provide them.")
 
     # 2. Create Session
     session = boto3.Session(

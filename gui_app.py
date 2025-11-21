@@ -157,9 +157,9 @@ class App(ctk.CTk):
         self.log_box.configure(state="disabled")
 
     def start_training_thread(self):
-        access_key = self.entry_access_key.get()
-        secret_key = self.entry_secret_key.get()
-        bucket_name = self.entry_bucket.get()
+        access_key = self.entry_access_key.get().strip()
+        secret_key = self.entry_secret_key.get().strip()
+        bucket_name = self.entry_bucket.get().strip()
         
         if not all([access_key, secret_key, bucket_name]):
             self.log("❌ Error: Please provide all AWS credentials.")
