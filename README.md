@@ -1,7 +1,9 @@
 # year-estimator
 
-# New version
+## Download
+[Download the latest Windows Executable (.exe)](https://github.com/loganh274/year-estimator/releases/latest/download/PhotoDateAI.exe)
 
+# New version
 Created a packaged .exe that allows you to run the train script and use the model locally.
 
 # Manual methods
