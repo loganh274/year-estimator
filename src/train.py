@@ -6,37 +6,30 @@ import os
 import time
 import boto3
 import botocore.exceptions
+import botocore.config
 
 from src.data.loaders import get_dataloaders
 from src.model.net import YearEstimator
 
-def get_aws_credentials():
+def get_aws_credentials(access_key=None, secret_key=None, bucket_name=None, region='us-east-1'):
     """
-    Interactively prompts for AWS credentials if not found in environment variables.
-    Validates connection to the S3 bucket.
+    Validates connection to the S3 bucket using provided credentials or environment variables.
     """
-    print("\n=== AWS S3 Configuration ===")
+    # 1. Get Credentials (if not provided)
+    if not access_key:
+        access_key = os.environ.get('AWS_ACCESS_KEY_ID')
+    if not secret_key:
+        secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
+    if not bucket_name:
+        bucket_name = os.environ.get('S3_BUCKET_NAME')
     
-    # 1. Get Credentials
-    access_key = os.environ.get('AWS_ACCESS_KEY_ID')
-    secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
-    region = os.environ.get('AWS_REGION', 'us-east-1')
-    bucket_name = os.environ.get('S3_BUCKET_NAME')
+    if not region:
+        region = os.environ.get('AWS_REGION', 'us-east-1')
 
     if not all([access_key, secret_key, bucket_name]):
-        print("AWS credentials not found in environment variables.")
-        print("Please enter your AWS details (these will not be saved to disk):")
-        
-        if not access_key:
-            access_key = input("AWS Access Key ID: ").strip()
-        if not secret_key:
-            secret_key = input("AWS Secret Access Key: ").strip()
-        if not bucket_name:
-            bucket_name = input("S3 Bucket Name: ").strip()
-        
-        region_input = input(f"AWS Region [{region}]: ").strip()
-        if region_input:
-            region = region_input
+        # Only prompt if we are in an interactive terminal and not being called from GUI
+        # For now, we'll just raise an error if missing, as the GUI should provide them
+        raise ValueError("Missing AWS credentials. Please provide them in the settings.")
 
     # 2. Create Session
     session = boto3.Session(
@@ -46,30 +39,26 @@ def get_aws_credentials():
     )
     
     # 3. Validate Connection
-    print(f"\nConnecting to bucket '{bucket_name}'...")
+    # print(f"\nConnecting to bucket '{bucket_name}'...") # Let caller handle logging
     s3 = session.client('s3', config=botocore.config.Config(connect_timeout=90, read_timeout=90))
     
     try:
         # Attempt to list a single object to verify permissions and connectivity
         s3.list_objects_v2(Bucket=bucket_name, MaxKeys=1)
-        print("✅ Connection successful!")
         return session, bucket_name
         
     except botocore.exceptions.ClientError as e:
         error_code = e.response['Error']['Code']
         if error_code == '403':
-            print("❌ Error: Access Denied (403). Please check your credentials and bucket permissions.")
+            raise PermissionError("Access Denied (403). Check credentials.")
         elif error_code == '404':
-            print(f"❌ Error: Bucket '{bucket_name}' not found (404).")
+            raise FileNotFoundError(f"Bucket '{bucket_name}' not found.")
         else:
-            print(f"❌ AWS Client Error: {e}")
-        raise e
+            raise e
     except botocore.exceptions.ConnectTimeout:
-        print("❌ Error: Connection timed out (90s). Please check your internet connection.")
-        raise
+        raise TimeoutError("Connection timed out.")
     except Exception as e:
-        print(f"❌ Unexpected Error: {e}")
-        raise
+        raise e
 
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
@@ -121,70 +110,95 @@ def validate(model, loader, criterion, device):
     
     return epoch_loss
 
-def main():
-    print("Initializing training script...")
+def run_training(access_key, secret_key, bucket_name, log_callback=print):
+    """
+    Main entry point for training, callable from GUI.
+    """
+    log_callback("Initializing training script...")
     
     # AWS Setup
     try:
-        s3_session, bucket_name = get_aws_credentials()
-    except Exception:
-        print("Failed to initialize AWS connection. Exiting.")
+        s3_session, bucket_name = get_aws_credentials(access_key, secret_key, bucket_name)
+        log_callback("✅ AWS Connection successful!")
+    except Exception as e:
+        log_callback(f"❌ Failed to initialize AWS connection: {str(e)}")
         return
 
     # Hyperparameters
     BATCH_SIZE = 32
-    NUM_WORKERS = 4 # Increased from 0 to 4 to improve GPU utilization
+    NUM_WORKERS = 0 # Set to 0 for Windows GUI compatibility to avoid multiprocessing issues
     LEARNING_RATE = 1e-4
-    NUM_EPOCHS = 15 # Increased for better convergence with normalization
+    NUM_EPOCHS = 15
     DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
     
-    print(f"Using device: {DEVICE}")
+    log_callback(f"Using device: {DEVICE}")
     
-    # Data
-    train_loader, val_loader = get_dataloaders(
-        "data/train.csv", 
-        "data/val.csv", 
-        s3_session=s3_session,
-        bucket_name=bucket_name,
-        batch_size=BATCH_SIZE, 
-        num_workers=NUM_WORKERS
-    )
-    
-    # Model
-    model = YearEstimator(pretrained=True)
-    model = model.to(DEVICE)
-    
-    # Optimization
-    criterion = nn.L1Loss() # MAE Loss
-    optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
-    
-    # Training Loop
-    best_val_loss = float('inf')
-    save_dir = "models"
-    os.makedirs(save_dir, exist_ok=True)
-    
-    print("Starting training...")
-    for epoch in range(NUM_EPOCHS):
-        start_time = time.time()
+    try:
+        # Data
+        log_callback("Setting up data loaders (this may take a moment)...")
+        train_loader, val_loader = get_dataloaders(
+            "data/train.csv", 
+            "data/val.csv", 
+            s3_session=s3_session,
+            bucket_name=bucket_name,
+            batch_size=BATCH_SIZE, 
+            num_workers=NUM_WORKERS
+        )
         
-        train_loss = train_one_epoch(model, train_loader, criterion, optimizer, DEVICE)
-        val_loss = validate(model, val_loader, criterion, DEVICE)
+        # Model
+        model = YearEstimator(pretrained=True)
+        model = model.to(DEVICE)
         
-        end_time = time.time()
-        epoch_mins = (end_time - start_time) / 60
+        # Optimization
+        criterion = nn.L1Loss() # MAE Loss
+        optimizer = optim.AdamW(model.parameters(), lr=LEARNING_RATE)
         
-        print(f"Epoch [{epoch+1}/{NUM_EPOCHS}] "
-              f"Time: {epoch_mins:.2f}m "
-              f"Train Loss: {train_loss:.4f} "
-              f"Val Loss: {val_loss:.4f}")
+        # Training Loop
+        best_val_loss = float('inf')
+        save_dir = "models"
+        os.makedirs(save_dir, exist_ok=True)
         
-        # Save best model
-        if val_loss < best_val_loss:
-            best_val_loss = val_loss
-            torch.save(model.state_dict(), os.path.join(save_dir, "best_model.pth"))
-            print(f"Saved best model with Val Loss: {val_loss:.4f}")
+        log_callback("Starting training...")
+        for epoch in range(NUM_EPOCHS):
+            start_time = time.time()
             
-    print("Training complete.")
+            # TODO: Pass log_callback to train_one_epoch if we want per-batch updates
+            # For now, we'll just log per epoch to keep it clean in the GUI
+            train_loss = train_one_epoch(model, train_loader, criterion, optimizer, DEVICE)
+            val_loss = validate(model, val_loader, criterion, DEVICE)
+            
+            end_time = time.time()
+            epoch_mins = (end_time - start_time) / 60
+            
+            log_msg = (f"Epoch [{epoch+1}/{NUM_EPOCHS}] "
+                       f"Time: {epoch_mins:.2f}m "
+                       f"Train Loss: {train_loss:.4f} "
+                       f"Val Loss: {val_loss:.4f}")
+            log_callback(log_msg)
+            
+            # Save best model
+            if val_loss < best_val_loss:
+                best_val_loss = val_loss
+                torch.save(model.state_dict(), os.path.join(save_dir, "best_model.pth"))
+                log_callback(f"  >> Saved best model with Val Loss: {val_loss:.4f}")
+                
+        log_callback("Training complete.")
+        
+    except Exception as e:
+        log_callback(f"❌ An error occurred during training: {str(e)}")
+        import traceback
+        log_callback(traceback.format_exc())
+
+def main():
+    # CLI entry point
+    print("=== CLI Training Mode ===")
+    try:
+        # For CLI, we still want to support env vars or input, but get_aws_credentials 
+        # now expects args or env vars. We can wrap it or just call run_training with None
+        # and let it fall back to env vars.
+        run_training(None, None, None)
+    except KeyboardInterrupt:
+        print("\nTraining interrupted.")
 
 if __name__ == "__main__":
     main()

@@ -8,3 +8,6 @@ numpy
 tqdm
 timm
 gradio
+customtkinter
+packaging
+pillow

@@ -1,0 +1,50 @@
+name: Build Windows Executable
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch: # Allow manual trigger for testing
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pyinstaller
+
+    - name: Build with PyInstaller
+      run: |
+        # Create the executable
+        # --noconsole: Don't show terminal window
+        # --onefile: Bundle everything into one .exe
+        # --collect-all customtkinter: Ensure CTK themes/assets are included
+        # --add-data: Include source code and model
+        # Note: Separator for add-data on Windows is ;
+        
+        pyinstaller --noconsole --onefile --name "PhotoDateAI" --collect-all customtkinter --add-data "src;src" --add-data "models/best_model.pth;models" gui_app.py
+
+    - name: Upload Release Asset
+      uses: softprops/action-gh-release@v1
+      if: startsWith(github.ref, 'refs/tags/')
+      with:
+        files: dist/PhotoDateAI.exe
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+    - name: Upload Artifact (for manual runs)
+      uses: actions/upload-artifact@v3
+      with:
+        name: PhotoDateAI-exe
+        path: dist/PhotoDateAI.exe
