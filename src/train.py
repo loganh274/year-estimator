@@ -7,6 +7,7 @@ import time
 import boto3
 import botocore.exceptions
 import botocore.config
+import sys
 
 from src.data.loaders import get_dataloaders
 from src.model.net import YearEstimator
@@ -84,8 +85,12 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss = 0.0
     
-    pbar = tqdm(loader, desc="Training", leave=False)
-    for images, labels in pbar:
+    # Disable tqdm if stderr is None (e.g. in GUI without console)
+    use_tqdm = sys.stderr is not None
+    
+    iterator = tqdm(loader, desc="Training", leave=False, disable=not use_tqdm) if use_tqdm else loader
+    
+    for images, labels in iterator:
         images = images.to(device)
         labels = labels.to(device).unsqueeze(1) # (batch, 1)
         
@@ -98,7 +103,8 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
         optimizer.step()
         
         running_loss += loss.item() * images.size(0)
-        pbar.set_postfix({"loss": loss.item()})
+        if use_tqdm:
+            iterator.set_postfix({"loss": loss.item()})
         
     epoch_loss = running_loss / len(loader.dataset)
     return epoch_loss
@@ -109,9 +115,13 @@ def validate(model, loader, criterion, device):
     preds = []
     targets = []
     
+    # Disable tqdm if stderr is None
+    use_tqdm = sys.stderr is not None
+    
     with torch.no_grad():
-        pbar = tqdm(loader, desc="Validation", leave=False)
-        for images, labels in pbar:
+        iterator = tqdm(loader, desc="Validation", leave=False, disable=not use_tqdm) if use_tqdm else loader
+        
+        for images, labels in iterator:
             images = images.to(device)
             labels = labels.to(device).unsqueeze(1)
             
