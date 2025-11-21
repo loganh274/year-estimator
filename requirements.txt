@@ -1,0 +1,10 @@
+boto3
+opencv-python
+torch
+torchvision
+albumentations
+pandas
+numpy
+tqdm
+timm
+gradio
