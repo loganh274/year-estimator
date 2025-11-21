@@ -1,4 +1,10 @@
 # year-estimator
+
+# New version
+
+Created a packaged .exe that allows you to run the train script and use the model locally.
+
+# Manual methods
 How to Run Training:
 
     Install Dependencies: pip install -r requirements.txt
